@@ -1,0 +1,186 @@
+version: 2.1
+
+orbs:
+  aws-ecr: circleci/aws-ecr@9.3.5
+  aws-cli: circleci/aws-cli@5.1.1
+  docker: circleci/docker@2.8.2
+
+jobs:
+  build-and-push-operator:
+    executor: aws-ecr/default
+    parameters:
+      push:
+        type: boolean
+        default: true
+      tag:
+        type: string
+        default: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+      account_id:
+        type: string
+        default: ${AWS_ACCOUNT_ID}
+      region:
+        type: string
+        default: us-west-2
+    working_directory: ~/spark-operator
+    steps:
+      - docker/check:
+          docker-username: DOCKERHUB_USERNAME
+          docker-password: DOCKERHUB_ACCESS_TOKEN
+      - aws-ecr/build_and_push_image:
+          push_image: << parameters.push >>
+          account_id: << parameters.account_id >>
+          repo: spark-operator
+          tag: << parameters.tag >>
+          platform: linux/amd64,linux/arm64
+          region: << parameters.region >>
+          path: .
+          setup_remote_docker: true
+          remote_docker_layer_caching: true
+          auth:
+            - aws-cli/setup:
+                region: << parameters.region >>
+
+  build-and-push-kubectl:
+    executor: aws-ecr/default
+    parameters:
+      push:
+        type: boolean
+        default: true
+      tag:
+        type: string
+        default: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+      account_id:
+        type: string
+        default: ${AWS_ACCOUNT_ID}
+      region:
+        type: string
+        default: us-west-2
+    working_directory: ~/spark-operator
+    steps:
+      - docker/check:
+          docker-username: DOCKERHUB_USERNAME
+          docker-password: DOCKERHUB_ACCESS_TOKEN
+      - aws-ecr/build_and_push_image:
+          push_image: << parameters.push >>
+          account_id: << parameters.account_id >>
+          repo: spark-operator-kubectl
+          tag: << parameters.tag >>
+          platform: linux/amd64,linux/arm64
+          region: << parameters.region >>
+          path: .
+          dockerfile: docker/Dockerfile.kubectl
+          setup_remote_docker: true
+          remote_docker_layer_caching: true
+          auth:
+            - aws-cli/setup:
+                region: << parameters.region >>
+
+  promote-to-production:
+    executor: aws-ecr/default
+    parameters:
+      repo:
+        type: string
+      staging_account_id:
+        type: string
+        default: ${AWS_STAGING_ACCOUNT_ID}
+      prod_account_id:
+        type: string
+        default: ${AWS_PROD_ACCOUNT_ID}
+      tag:
+        type: string
+        default: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+      region:
+        type: string
+        default: us-west-2
+    working_directory: ~/spark-operator
+    steps:
+      - aws-cli/setup:
+          region: << parameters.region >>
+      - docker/check:
+          docker-username: DOCKERHUB_USERNAME
+          docker-password: DOCKERHUB_ACCESS_TOKEN
+      - run:
+          name: Login to staging ECR and pull image
+          command: |
+            aws ecr get-login-password --region << parameters.region >> | docker login --username AWS --password-stdin << parameters.staging_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com
+            STAGING_TAG="${CIRCLE_BRANCH//\//-}"
+            STAGING_IMAGE="<< parameters.staging_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com/<< parameters.repo >>:${STAGING_TAG}"
+            echo "Pulling image from staging: ${STAGING_IMAGE}"
+            docker pull ${STAGING_IMAGE}
+      - run:
+          name: Login to production ECR
+          command: |
+            aws ecr get-login-password --region << parameters.region >> | docker login --username AWS --password-stdin << parameters.prod_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com
+      - run:
+          name: Retag image for production
+          command: |
+            STAGING_TAG="${CIRCLE_BRANCH//\//-}"
+            STAGING_IMAGE="<< parameters.staging_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com/<< parameters.repo >>:${STAGING_TAG}"
+            TAGS=($(echo "<< parameters.tag >>" | tr ',' ' '))
+            for TAG in "${TAGS[@]}"; do
+              PROD_IMAGE="<< parameters.prod_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com/<< parameters.repo >>:${TAG}"
+              echo "Retagging for production: ${PROD_IMAGE}"
+              docker tag ${STAGING_IMAGE} ${PROD_IMAGE}
+            done
+      - run:
+          name: Push images to production ECR
+          command: |
+            TAGS=($(echo "<< parameters.tag >>" | tr ',' ' '))
+            for TAG in "${TAGS[@]}"; do
+              PROD_IMAGE="<< parameters.prod_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com/<< parameters.repo >>:${TAG}"
+              echo "Pushing to production: ${PROD_IMAGE}"
+              docker push ${PROD_IMAGE}
+            done
+
+workflows:
+  build-and-push-docker-non-prod:
+    when:
+      equal: [ staging, << pipeline.git.branch >> ]
+    jobs:
+      - build-and-push-operator:
+          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          context:
+            - non-prod
+            - dockerhub
+      - build-and-push-kubectl:
+          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          context:
+            - non-prod
+            - dockerhub
+
+  build-and-push-docker-prod:
+    when:
+      equal: [ main, << pipeline.git.branch >> ]
+    jobs:
+      - build-and-push-operator:
+          name: build-and-push-operator-to-staging
+          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          account_id: ${AWS_ACCOUNT_ID}
+          context:
+            - non-prod
+            - dockerhub
+      - build-and-push-kubectl:
+          name: build-and-push-kubectl-to-staging
+          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          account_id: ${AWS_ACCOUNT_ID}
+          context:
+            - non-prod
+            - dockerhub
+      - promote-to-production:
+          name: promote-operator-to-production
+          requires:
+            - build-and-push-operator-to-staging
+          repo: spark-operator
+          tag: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+          context:
+            - aws-credentials
+            - dockerhub
+      - promote-to-production:
+          name: promote-kubectl-to-production
+          requires:
+            - build-and-push-kubectl-to-staging
+          repo: spark-operator-kubectl
+          tag: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+          context:
+            - aws-credentials
+            - dockerhub
