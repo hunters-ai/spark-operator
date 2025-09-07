@@ -121,6 +121,9 @@ spec:
         {{- if .Values.controller.maxTrackedExecutorPerApp }}
         - --max-tracked-executor-per-app={{ .Values.controller.maxTrackedExecutorPerApp }}
         {{- end }}
+        {{- if .Values.controller.labelSelectorFilter }}
+        - --label-selector-filter={{ .Values.controller.labelSelectorFilter }}
+        {{- end }}
         {{- if or .Values.prometheus.metrics.enable .Values.controller.pprof.enable }}
         ports:
         {{- if .Values.controller.pprof.enable }}
