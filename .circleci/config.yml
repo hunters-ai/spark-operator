@@ -63,7 +63,7 @@ jobs:
       - aws-ecr/build_and_push_image:
           push_image: << parameters.push >>
           account_id: << parameters.account_id >>
-          repo: spark-operator-kubectl
+          repo: spark-operator
           tag: << parameters.tag >>
           platform: linux/amd64,linux/arm64
           region: << parameters.region >>
@@ -80,6 +80,9 @@ jobs:
     parameters:
       repo:
         type: string
+      staging_tag_prefix:
+        type: string
+        default: ""
       staging_account_id:
         type: string
         default: ${AWS_STAGING_ACCOUNT_ID}
@@ -103,7 +106,7 @@ jobs:
           name: Login to staging ECR and pull image
           command: |
             aws ecr get-login-password --region << parameters.region >> | docker login --username AWS --password-stdin << parameters.staging_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com
-            STAGING_TAG="${CIRCLE_BRANCH//\//-}"
+            STAGING_TAG="<< parameters.staging_tag_prefix >>${CIRCLE_BRANCH//\//-}"
             STAGING_IMAGE="<< parameters.staging_account_id >>.dkr.ecr.<< parameters.region >>.amazonaws.com/<< parameters.repo >>:${STAGING_TAG}"
             echo "Pulling image from staging: ${STAGING_IMAGE}"
             docker pull ${STAGING_IMAGE}
@@ -138,12 +141,12 @@ workflows:
       equal: [ staging, << pipeline.git.branch >> ]
     jobs:
       - build-and-push-operator:
-          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          tag: staging,latest,staging-${CIRCLE_SHA1:0:7}
           context:
             - non-prod
             - dockerhub
       - build-and-push-kubectl:
-          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          tag: kubectl-staging,kubectl-staging-${CIRCLE_SHA1:0:7}
           context:
             - non-prod
             - dockerhub
@@ -154,14 +157,14 @@ workflows:
     jobs:
       - build-and-push-operator:
           name: build-and-push-operator-to-staging
-          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          tag: staging,latest,main,staging-${CIRCLE_SHA1:0:7}
           account_id: ${AWS_ACCOUNT_ID}
           context:
             - non-prod
             - dockerhub
       - build-and-push-kubectl:
           name: build-and-push-kubectl-to-staging
-          tag: staging,latest,${CIRCLE_BRANCH//\//-}
+          tag: kubectl-staging,kubectl-staging-${CIRCLE_SHA1:0:7},kubectl-main
           account_id: ${AWS_ACCOUNT_ID}
           context:
             - non-prod
@@ -179,8 +182,9 @@ workflows:
           name: promote-kubectl-to-production
           requires:
             - build-and-push-kubectl-to-staging
-          repo: spark-operator-kubectl
-          tag: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+          repo: spark-operator
+          staging_tag_prefix: "kubectl-"
+          tag: kubectl-$CIRCLE_SHA1,kubectl-${CIRCLE_SHA1:0:7},kubectl-${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},kubectl-latest
           context:
             - aws-credentials
             - dockerhub
