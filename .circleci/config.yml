@@ -118,7 +118,7 @@ workflows:
     jobs:
       - build-and-push-operator:
           name: build-and-push-operator-to-staging
-          tag: staging,latest,main,staging-${CIRCLE_SHA1:0:7}
+          tag: master,latest,master-${CIRCLE_SHA1:0:7}
           account_id: ${AWS_ACCOUNT_ID}
           context:
             - non-prod
