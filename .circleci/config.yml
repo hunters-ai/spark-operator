@@ -39,41 +39,7 @@ jobs:
           auth:
             - aws-cli/setup:
                 region: << parameters.region >>
-
-  build-and-push-kubectl:
-    executor: aws-ecr/default
-    parameters:
-      push:
-        type: boolean
-        default: true
-      tag:
-        type: string
-        default: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
-      account_id:
-        type: string
-        default: ${AWS_ACCOUNT_ID}
-      region:
-        type: string
-        default: us-west-2
-    working_directory: ~/spark-operator
-    steps:
-      - docker/check:
-          docker-username: DOCKERHUB_USERNAME
-          docker-password: DOCKERHUB_ACCESS_TOKEN
-      - aws-ecr/build_and_push_image:
-          push_image: << parameters.push >>
-          account_id: << parameters.account_id >>
-          repo: spark-operator
-          tag: << parameters.tag >>
-          platform: linux/amd64,linux/arm64
-          region: << parameters.region >>
-          path: .
-          dockerfile: docker/Dockerfile.kubectl
-          setup_remote_docker: true
-          remote_docker_layer_caching: true
-          auth:
-            - aws-cli/setup:
-                region: << parameters.region >>
+  
 
   promote-to-production:
     executor: aws-ecr/default
@@ -145,11 +111,6 @@ workflows:
           context:
             - non-prod
             - dockerhub
-      - build-and-push-kubectl:
-          tag: kubectl-staging,kubectl-staging-${CIRCLE_SHA1:0:7}
-          context:
-            - non-prod
-            - dockerhub
 
   build-and-push-docker-prod:
     when:
@@ -162,29 +123,12 @@ workflows:
           context:
             - non-prod
             - dockerhub
-      - build-and-push-kubectl:
-          name: build-and-push-kubectl-to-staging
-          tag: kubectl-staging,kubectl-staging-${CIRCLE_SHA1:0:7},kubectl-main
-          account_id: ${AWS_ACCOUNT_ID}
-          context:
-            - non-prod
-            - dockerhub
       - promote-to-production:
           name: promote-operator-to-production
           requires:
             - build-and-push-operator-to-staging
           repo: spark-operator
           tag: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
-          context:
-            - aws-credentials
-            - dockerhub
-      - promote-to-production:
-          name: promote-kubectl-to-production
-          requires:
-            - build-and-push-kubectl-to-staging
-          repo: spark-operator
-          staging_tag_prefix: "kubectl-"
-          tag: kubectl-$CIRCLE_SHA1,kubectl-${CIRCLE_SHA1:0:7},kubectl-${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},kubectl-latest
           context:
             - aws-credentials
             - dockerhub
