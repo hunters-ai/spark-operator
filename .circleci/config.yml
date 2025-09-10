@@ -5,9 +5,17 @@ orbs:
   aws-cli: circleci/aws-cli@5.1.1
   docker: circleci/docker@2.8.2
 
+executors:
+  docker:
+    docker:
+      - image: cimg/base:2025.06-22.04
+        auth:
+          username: $DOCKERHUB_USERNAME
+          password: $DOCKERHUB_ACCESS_TOKEN
+
 jobs:
   build-and-push-operator:
-    executor: aws-ecr/default
+    executor: docker
     parameters:
       push:
         type: boolean
@@ -42,7 +50,7 @@ jobs:
   
 
   promote-to-production:
-    executor: aws-ecr/default
+    executor: docker
     parameters:
       repo:
         type: string
@@ -102,12 +110,25 @@ jobs:
             done
 
 workflows:
-  build-and-push-docker-non-prod:
+  build-and-push-docker-staging:
     when:
       equal: [ staging, << pipeline.git.branch >> ]
     jobs:
       - build-and-push-operator:
-          tag: staging,latest,staging-${CIRCLE_SHA1:0:7}
+          tag: staging,staging-${CIRCLE_SHA1:0:7},staging-${CIRCLE_SHA1}
+          context:
+            - non-prod
+            - dockerhub
+
+  build-and-push-docker-non-prod:
+    when:
+      not:
+        or:
+          - equal: [ master, << pipeline.git.branch >> ]
+          - equal: [ staging, << pipeline.git.branch >> ]
+    jobs:
+      - build-and-push-operator:
+          tag: ${CIRCLE_BRANCH//\//-},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1}
           context:
             - non-prod
             - dockerhub
@@ -118,7 +139,7 @@ workflows:
     jobs:
       - build-and-push-operator:
           name: build-and-push-operator-to-staging
-          tag: master,latest,master-${CIRCLE_SHA1:0:7}
+          tag: master,latest,master-${CIRCLE_SHA1:0:7},master-${CIRCLE_SHA1}
           account_id: ${AWS_ACCOUNT_ID}
           context:
             - non-prod
@@ -128,7 +149,7 @@ workflows:
           requires:
             - build-and-push-operator-to-staging
           repo: spark-operator
-          tag: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},latest
+          tag: $CIRCLE_SHA1,${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1},latest
           context:
             - aws-credentials
             - dockerhub
