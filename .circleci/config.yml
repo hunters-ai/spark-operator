@@ -71,11 +71,20 @@ jobs:
         default: us-west-2
     working_directory: ~/spark-operator
     steps:
+      - setup_remote_docker
       - aws-cli/setup:
           region: << parameters.region >>
       - docker/check:
           docker-username: DOCKERHUB_USERNAME
           docker-password: DOCKERHUB_ACCESS_TOKEN
+      - run:
+          name: Map staging AWS credentials (if provided)
+          command: |
+            if [ -n "${STAGING_AWS_ACCESS_KEY:-}" ]; then
+              echo "Using staging AWS credentials"
+              export AWS_ACCESS_KEY_ID="${STAGING_AWS_ACCESS_KEY}"
+              export AWS_SECRET_ACCESS_KEY="${STAGING_AWS_SECRET_KEY}"
+            fi
       - run:
           name: Login to staging ECR and pull image
           command: |
