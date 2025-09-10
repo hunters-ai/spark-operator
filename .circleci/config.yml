@@ -5,9 +5,17 @@ orbs:
   aws-cli: circleci/aws-cli@5.1.1
   docker: circleci/docker@2.8.2
 
+executors:
+  docker:
+    docker:
+      - image: cimg/base:2025.06-22.04
+        auth:
+          username: $DOCKERHUB_USERNAME
+          password: $DOCKERHUB_ACCESS_TOKEN
+
 jobs:
   build-and-push-operator:
-    executor: aws-ecr/default
+    executor: docker
     parameters:
       push:
         type: boolean
@@ -42,7 +50,7 @@ jobs:
   
 
   promote-to-production:
-    executor: aws-ecr/default
+    executor: docker
     parameters:
       repo:
         type: string
