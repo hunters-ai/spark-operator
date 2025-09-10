@@ -110,12 +110,25 @@ jobs:
             done
 
 workflows:
-  build-and-push-docker-non-prod:
+  build-and-push-docker-staging:
     when:
       equal: [ staging, << pipeline.git.branch >> ]
     jobs:
       - build-and-push-operator:
-          tag: staging,latest,staging-${CIRCLE_SHA1:0:7}
+          tag: staging,staging-${CIRCLE_SHA1:0:7}
+          context:
+            - non-prod
+            - dockerhub
+
+  build-and-push-docker-non-prod:
+    when:
+      not:
+        or:
+          - equal: [ master, << pipeline.git.branch >> ]
+          - equal: [ staging, << pipeline.git.branch >> ]
+    jobs:
+      - build-and-push-operator:
+          tag: ${CIRCLE_BRANCH//\//-},${CIRCLE_BRANCH//\//-}-${CIRCLE_SHA1:0:7}
           context:
             - non-prod
             - dockerhub
